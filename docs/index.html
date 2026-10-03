@@ -1,0 +1,1320 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>System 1 Decision Lab</title>
+<meta name="description" content="How Jev and Laya answer typed questions in one forward pass, and how to build one: serialisation, the marker head, RLCD training and calibration, with interactive instruments.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+/* Layout: a long-form lab notebook. Each section pairs a short explanation with a working instrument; [MASK] markers are the one loud colour. */
+:root {
+  color-scheme: light;
+  --paper: #f4f5f1;
+  --surface: #fcfcfa;
+  --sunken: #ebede7;
+  --ink: #121a17;
+  --ink-2: #4a5550;
+  --muted: #747e78;
+  --rule: #d9ddd5;
+  --marker: #c4501a;
+  --marker-soft: #f6dccd;
+  --series-1: #2a78d6;
+  --series-1-soft: #cde2fb;
+  --series-2: #eb6834;
+  --reference: #9aa19c;
+  --good: #14845c;
+  --warn: #b26b00;
+  --tok-special: #dfe3dc;
+  --tok-head: #e4ecf7;
+  --tok-state: #eef0ea;
+  --opt-0: #e2eefc; --opt-1: #fbe6d6; --opt-2: #dcf3ea; --opt-3: #fbefd0; --opt-4: #f8e1ec;
+  --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --step--1: 0.8125rem; --step-0: 1rem; --step-1: 1.1875rem; --step-2: 1.5rem; --step-3: 2.125rem; --step-4: clamp(2.4rem, 5.5vw, 3.75rem);
+  --radius: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper: #111513; --surface: #181d1a; --sunken: #0c0f0d; --ink: #eef1ec; --ink-2: #b7c0ba; --muted: #858f89; --rule: #2a312d;
+    --marker: #f07a3e; --marker-soft: #4a2716; --series-1: #3987e5; --series-1-soft: #173554; --series-2: #d95926; --reference: #6f7671;
+    --good: #3cc98f; --warn: #e3a23b;
+    --tok-special: #2b322e; --tok-head: #1d2c3d; --tok-state: #202622;
+    --opt-0: #1b3149; --opt-1: #43281a; --opt-2: #173a2c; --opt-3: #3d3216; --opt-4: #3e2030;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper: #111513; --surface: #181d1a; --sunken: #0c0f0d; --ink: #eef1ec; --ink-2: #b7c0ba; --muted: #858f89; --rule: #2a312d;
+  --marker: #f07a3e; --marker-soft: #4a2716; --series-1: #3987e5; --series-1-soft: #173554; --series-2: #d95926; --reference: #6f7671;
+  --good: #3cc98f; --warn: #e3a23b;
+  --tok-special: #2b322e; --tok-head: #1d2c3d; --tok-state: #202622;
+  --opt-0: #1b3149; --opt-1: #43281a; --opt-2: #173a2c; --opt-3: #3d3216; --opt-4: #3e2030;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--paper); color: var(--ink);
+  font: 400 var(--step-0)/1.6 var(--font-body);
+  padding-inline: 16px;
+}
+.wrap { max-width: 1120px; margin-inline: auto; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; line-height: 1.1; margin: 0; letter-spacing: -0.01em; }
+h2 { font-size: var(--step-3); font-weight: 700; }
+h3 { font-size: var(--step-1); font-weight: 700; }
+p { margin: 0; max-width: 65ch; }
+a { color: var(--series-1); text-underline-offset: 3px; }
+code, .mono { font-family: var(--font-mono); font-size: 0.9em; }
+:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
+.mk { background: var(--marker-soft); color: var(--marker); font-family: var(--font-mono); font-size: 0.85em; padding: 0 0.3em; border-radius: 3px; white-space: nowrap; }
+.label { font-size: var(--step--1); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600; }
+.note { font-size: var(--step--1); color: var(--muted); }
+.stack { display: flex; flex-direction: column; gap: 14px; }
+
+/* top bar */
+.masthead { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-block: 18px; border-bottom: 1px solid var(--rule); flex-wrap: wrap; }
+.brand { font-family: var(--font-display); font-weight: 800; font-size: var(--step-1); }
+.brand b { color: var(--marker); font-weight: 800; }
+.nav { display: flex; gap: 4px 18px; flex-wrap: wrap; font-size: var(--step--1); }
+.nav a { color: var(--ink-2); text-decoration: none; }
+.nav a:hover { color: var(--ink); text-decoration: underline; }
+
+/* hero */
+.hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 40px; padding-block: 48px 40px; align-items: start; }
+.hero h1 { font-size: var(--step-4); font-weight: 800; }
+.hero h1 em { font-style: normal; color: var(--marker); }
+.hero .lede { font-size: var(--step-1); color: var(--ink-2); margin-top: 18px; }
+.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 26px; }
+.fact { border-top: 2px solid var(--ink); padding-top: 8px; }
+.fact strong { display: block; font-family: var(--font-display); font-size: var(--step-2); font-variant-numeric: tabular-nums; }
+.fact span { font-size: var(--step--1); color: var(--ink-2); }
+
+.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: var(--radius); padding: 18px; min-width: 0; }
+.panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+textarea, input[type="text"], select {
+  width: 100%; font: 400 var(--step--1)/1.5 var(--font-mono); color: var(--ink); background: var(--paper);
+  border: 1px solid var(--rule); border-radius: 4px; padding: 8px 10px;
+}
+textarea { resize: vertical; }
+button {
+  font: 600 var(--step--1)/1 var(--font-body); color: var(--surface); background: var(--ink); border: 1px solid var(--ink);
+  border-radius: 4px; padding: 9px 14px; cursor: pointer;
+}
+button.ghost { background: transparent; color: var(--ink); border-color: var(--rule); }
+button:hover { filter: brightness(1.15); }
+button.ghost:hover { border-color: var(--ink-2); filter: none; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { font: 500 var(--step--1)/1 var(--font-body); padding: 7px 11px; border-radius: 999px; border: 1px solid var(--rule); background: transparent; color: var(--ink-2); cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+
+/* answers */
+.answers { display: grid; gap: 14px; margin-top: 14px; }
+.answer { border-top: 1px solid var(--rule); padding-top: 10px; }
+.answer-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.answer-head .q { font-weight: 600; }
+.type-tag { font: 500 0.72rem/1 var(--font-mono); padding: 3px 6px; border-radius: 3px; background: var(--sunken); color: var(--ink-2); margin-right: 6px; vertical-align: 1px; }
+.answer-value { font-family: var(--font-mono); font-size: var(--step--1); color: var(--ink); }
+.bars { display: grid; gap: 4px; margin-top: 8px; }
+.bar { display: grid; grid-template-columns: minmax(70px, 9rem) minmax(0, 1fr) 3.4rem; gap: 8px; align-items: center; font-size: var(--step--1); }
+.bar .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-family: var(--font-mono); }
+.bar .track { display: block; height: 10px; background: var(--sunken); border-radius: 0 4px 4px 0; overflow: hidden; }
+.bar .fill { display: block; height: 100%; background: var(--series-1); border-radius: 0 4px 4px 0; transition: width 0.45s ease; }
+.bar.best .fill { background: var(--marker); }
+.bar .pct { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-mono); color: var(--ink-2); }
+details.json { margin-top: 14px; }
+details.json summary { cursor: pointer; font-size: var(--step--1); color: var(--ink-2); }
+pre { font: 400 0.78rem/1.5 var(--font-mono); background: var(--sunken); border-radius: 4px; padding: 12px; overflow-x: auto; margin: 8px 0 0; color: var(--ink); }
+
+/* sections */
+section.block { padding-block: 56px; border-top: 1px solid var(--rule); }
+.section-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-bottom: 26px; }
+.section-head .label { color: var(--marker); }
+.section-head p { color: var(--ink-2); }
+.split { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 32px; align-items: start; }
+.split > * { min-width: 0; }
+
+/* compare table */
+.table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: var(--step--1); min-width: 560px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-weight: 600; color: var(--ink-2); background: var(--sunken); }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
+tr.ours td { background: color-mix(in srgb, var(--series-1-soft) 45%, transparent); }
+
+/* lanes */
+.lanes { display: grid; gap: 18px; }
+.lane-title { display: flex; justify-content: space-between; gap: 10px; font-size: var(--step--1); margin-bottom: 6px; flex-wrap: wrap; }
+.lane-track { display: flex; flex-wrap: wrap; gap: 3px; min-height: 30px; align-items: center; padding: 6px; background: var(--sunken); border-radius: 4px; }
+.ltok { font: 400 0.72rem/1 var(--font-mono); padding: 5px 5px; border-radius: 3px; background: var(--surface); border: 1px solid var(--rule); }
+.ltok.parse { background: var(--marker-soft); border-color: transparent; color: var(--marker); }
+.lpass { font: 600 0.72rem/1 var(--font-mono); padding: 6px 10px; border-radius: 3px; background: var(--series-1); color: var(--surface); }
+
+/* sequence builder */
+.builder-grid { display: grid; grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr); gap: 20px; }
+.builder-grid > * { min-width: 0; }
+.field { display: grid; gap: 5px; }
+.field label { font-size: var(--step--1); color: var(--ink-2); font-weight: 600; }
+.slider-row { display: grid; grid-template-columns: 7.5rem minmax(0, 1fr) 3rem; gap: 8px; align-items: center; font-size: var(--step--1); }
+.slider-row output { font-family: var(--font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; accent-color: var(--series-1); }
+.tokens { display: flex; flex-wrap: wrap; gap: 3px; padding: 10px; background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; max-height: 330px; overflow-y: auto; }
+.t { font: 400 0.72rem/1 var(--font-mono); padding: 4px 4px; border-radius: 3px; background: var(--tok-state); color: var(--ink-2); }
+.t.sp { background: var(--tok-special); color: var(--ink); font-weight: 500; }
+.t.hd { background: var(--tok-head); color: var(--ink); }
+.t.mask { background: var(--marker); color: var(--surface); font-weight: 500; }
+.t.cut { text-decoration: line-through; opacity: 0.45; }
+.t.o0 { background: var(--opt-0); color: var(--ink); } .t.o1 { background: var(--opt-1); color: var(--ink); } .t.o2 { background: var(--opt-2); color: var(--ink); }
+.t.o3 { background: var(--opt-3); color: var(--ink); } .t.o4 { background: var(--opt-4); color: var(--ink); }
+.meters { display: grid; gap: 8px; margin: 12px 0; }
+.meter { display: grid; grid-template-columns: 8rem minmax(0, 1fr) 6.5rem; gap: 8px; align-items: center; font-size: var(--step--1); }
+.meter .track { height: 8px; background: var(--sunken); border-radius: 4px; overflow: hidden; display: flex; }
+.meter .seg { height: 100%; }
+.meter output { font-family: var(--font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.legend { display: flex; gap: 6px 14px; flex-wrap: wrap; font-size: var(--step--1); color: var(--ink-2); }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.warnline { font-size: var(--step--1); color: var(--warn); }
+
+/* pipeline */
+.pipe { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; margin-top: 8px; }
+.stage { border: 1px solid var(--rule); border-radius: 4px; padding: 10px 8px; font-size: 0.78rem; background: var(--surface); text-align: center; cursor: pointer; color: var(--ink-2); line-height: 1.3; }
+.stage b { display: block; font-family: var(--font-display); font-size: 0.9rem; color: var(--ink); margin-bottom: 3px; }
+.stage[aria-current="step"] { border-color: var(--marker); box-shadow: inset 0 0 0 1px var(--marker); color: var(--ink); }
+.stage-detail { margin-top: 12px; padding: 14px; background: var(--sunken); border-radius: 4px; display: grid; gap: 8px; }
+.stage-detail .shape { font-family: var(--font-mono); font-size: var(--step--1); color: var(--marker); }
+
+/* charts */
+.chart { width: 100%; height: auto; display: block; overflow: visible; }
+.chart text { fill: var(--ink-2); font: 400 11px var(--font-body); }
+.chart .val { fill: var(--ink); font-family: var(--font-mono); font-size: 11px; }
+.chart .axis { stroke: var(--rule); }
+.chart .grid { stroke: var(--rule); stroke-dasharray: 2 3; }
+.tip { position: fixed; pointer-events: none; z-index: 10; background: var(--ink); color: var(--surface); font: 400 0.75rem/1.4 var(--font-body); padding: 6px 9px; border-radius: 4px; max-width: 260px; }
+.cards3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.cards2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: var(--step--1); }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
+.reward-big { font-family: var(--font-display); font-size: var(--step-3); font-variant-numeric: tabular-nums; }
+.samples { display: grid; gap: 6px; font-size: var(--step--1); }
+.sample { display: grid; grid-template-columns: 1.6rem minmax(0, 1fr) 4.2rem 4.2rem; gap: 8px; align-items: center; }
+.sample .mini { display: flex; height: 12px; border-radius: 2px; overflow: hidden; gap: 1px; background: var(--surface); }
+.sample .mini span { height: 100%; }
+.sample .num { font-family: var(--font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.pos { color: var(--good); } .neg { color: var(--marker); }
+.code-steps { display: grid; gap: 10px; counter-reset: s; }
+.code-steps li { list-style: none; padding-left: 2rem; position: relative; }
+.code-steps li::before { counter-increment: s; content: counter(s); position: absolute; left: 0; top: 0.1em; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: var(--ink); color: var(--surface); font: 600 0.75rem/1.4rem var(--font-mono); text-align: center; }
+.sources li { margin-bottom: 6px; font-size: var(--step--1); }
+footer { padding-block: 36px 56px; border-top: 1px solid var(--rule); font-size: var(--step--1); color: var(--muted); display: flex; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
+
+@media (max-width: 900px) {
+  .hero, .split, .builder-grid { grid-template-columns: minmax(0, 1fr); }
+  .cards3 { grid-template-columns: minmax(0, 1fr); }
+  .pipe { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .cards2, .facts { grid-template-columns: minmax(0, 1fr); }
+  .pipe { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .slider-row { grid-template-columns: 6rem minmax(0, 1fr) 2.6rem; }
+  .meter { grid-template-columns: 6rem minmax(0, 1fr) 5.6rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="masthead">
+  <div class="brand">System 1 <b>[MASK]</b> Lab</div>
+  <nav class="nav" aria-label="Sections">
+    <a href="#landscape">Jev &amp; Laya</a>
+    <a href="#speed">One pass</a>
+    <a href="#sequence">Sequence</a>
+    <a href="#rlcd">RLCD</a>
+    <a href="#calibration">Calibration</a>
+    <a href="#runs">Our runs</a>
+    <a href="#build">Build it</a>
+  </nav>
+</header>
+
+<section class="hero" aria-labelledby="hero-title">
+  <div>
+    <p class="label">Typed decision models &middot; October 2026</p>
+    <h1 id="hero-title" style="margin-top:12px">Decisions,<br>not <em>text</em>.</h1>
+    <p class="lede">TypeSafe's <strong>Jev</strong> and Convai's open-source <strong>Laya</strong> answer typed questions about a piece of text with a probability distribution, in a single encoder pass. They generate no tokens, so there is no JSON to parse and no free-text answer to go off-schema.</p>
+    <p class="lede" style="font-size:var(--step-0)">This page takes the mechanism apart: how a request becomes one sequence with a <span class="mk">[MASK]</span> per option, how RLCD trains honest probabilities, and what our own reproduction learned on the same benchmark.</p>
+    <div class="facts">
+      <div class="fact"><strong>33&ndash;40 ms</strong><span>Laya, 1 question, T4 GPU (publisher)</span></div>
+      <div class="fact"><strong>236&ndash;276 ms</strong><span>Jev API p50, via Laya's benchmark</span></div>
+      <div class="fact"><strong>0</strong><span>output tokens generated</span></div>
+    </div>
+  </div>
+
+  <div class="panel" id="demo">
+    <div class="panel-head">
+      <h3>Try a request</h3>
+      <div class="chips" role="group" aria-label="Example state" id="preset-chips"></div>
+    </div>
+    <div class="field">
+      <label for="demo-state">State</label>
+      <textarea id="demo-state" rows="4"></textarea>
+    </div>
+    <div class="row" style="margin-top:10px; justify-content:space-between">
+      <span class="note">Stand-in scorer runs in your browser. It shows the contract, not Laya's or Jev's accuracy.</span>
+      <button id="demo-run" type="button">Decide</button>
+    </div>
+    <div class="answers" id="demo-answers" aria-live="polite"></div>
+    <details class="json">
+      <summary>Request and response JSON</summary>
+      <pre id="demo-json"></pre>
+    </details>
+  </div>
+</section>
+
+<section class="block" id="landscape" aria-labelledby="landscape-title">
+  <div class="section-head">
+    <p class="label">The landscape</p>
+    <h2 id="landscape-title">Two System 1 models, one interface</h2>
+    <p>Both models take a <em>state</em> (a string, JSON object, or list of turns) and named questions of three types. <code>choice</code> picks among caller-defined options. <code>score</code> rates on an ordered rubric. <code>noul</code> gives the probability a statement is true. Jev is a hosted API with undisclosed internals. Laya publishes weights, code and its training notebook under Apache-2.0, which is why the rest of this page builds on Laya's design.</p>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th></th><th>Jev (TypeSafe)</th><th>Laya (Convai Innovations)</th></tr></thead>
+      <tbody>
+        <tr><td>Released</td><td>Announced 15 Sep 2026; <code>jev-latest</code>, benchmarked as 1.13.0</td><td>Open weights, Sep 2026; package v0.3.20</td></tr>
+        <tr><td>Access</td><td>Hosted API (<code>POST /v1/systemone</code>) and SDKs</td><td><code>pip install laya</code>, self-hosted server compatible with Jev's request shape</td></tr>
+        <tr><td>Architecture</td><td>Not published. Described as a parallel sampler that answers all questions in one query.</td><td>ModernBERT-large encoder (395M) + 2-layer transformer head + <span class="mk">[MASK]</span> option scorer = 421M. Multilingual: mmBERT-base, 322M.</td></tr>
+        <tr><td>Context</td><td>Text only (strings, JSON, arrays of text)</td><td>512 tokens (English, 192 for the question head); 1,024&ndash;8,192 multilingual</td></tr>
+        <tr><td>Training</td><td>RLCD, reinforcement learning for calibrated decisions (no recipe published)</td><td>RLCD: Gaussian logit noise, log + spherical + RPS rewards, REINFORCE with group-mean baseline, TD(&lambda;=1) for multi-turn</td></tr>
+        <tr><td>Calibration</td><td>Optimised against outcomes; measured across groups, not per answer</td><td>ECE 0.213 raw &rarr; 0.081 after per-type temperature fitting</td></tr>
+        <tr><td>Price</td><td>Reported $0.042 per million input tokens, output free</td><td>Free to run; you pay for the GPU</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="cards2" style="margin-top:22px">
+    <div class="panel">
+      <div class="panel-head"><h3>Accuracy by benchmark</h3><span class="note">publisher-reported</span></div>
+      <svg class="chart" id="chart-bench" viewBox="0 0 520 300" role="img" aria-label="Accuracy of Laya and Jev on four benchmarks"></svg>
+      <div class="legend" style="margin-top:8px"><span><i style="background:var(--series-1)"></i>Laya (routed)</span><span><i style="background:var(--series-2)"></i>Jev</span></div>
+      <p class="note" style="margin-top:8px">Laya's model card numbers. Jev's were collected through its API by Laya's author: not a controlled head-to-head. Laya's typed-decisions figure is from a checkpoint fine-tuned on that benchmark's train split. Note the Banking77 collapse at 72&ndash;77 options.</p>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3>Latency per call</h3><span class="note">milliseconds, lower is faster</span></div>
+      <svg class="chart" id="chart-latency" viewBox="0 0 520 300" role="img" aria-label="Latency of Laya and Jev"></svg>
+      <p class="note" style="margin-top:8px">Laya: local T4 GPU, model time only. Jev: API p50 over the network. Ten questions in one Laya call cost 72&ndash;159 ms total, 7&ndash;16 ms each.</p>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="speed" aria-labelledby="speed-title">
+  <div class="split">
+    <div class="stack">
+      <p class="label">Why one pass is fast</p>
+      <h2 id="speed-title">An LLM writes its answer. A System 1 model reads it off.</h2>
+      <p>To return three typed answers, a decoder LLM generates the JSON one token at a time. Each token is a full forward pass that depends on the previous one, and the result still has to be parsed and validated against the schema.</p>
+      <p>A System 1 model puts every allowed answer into the input. One bidirectional encoder pass scores them all at once, and questions about the same state are batched together. The output is already typed, so there is nothing to parse.</p>
+      <p class="note">The animation is schematic: one block per forward pass, not a timing measurement.</p>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3>Three questions, two ways</h3><button class="ghost" id="lanes-replay" type="button">Replay</button></div>
+      <div class="lanes">
+        <div>
+          <div class="lane-title"><strong>Decoder LLM</strong><span class="mono" id="lane-llm-count">0 passes</span></div>
+          <div class="lane-track" id="lane-llm" aria-live="off"></div>
+        </div>
+        <div>
+          <div class="lane-title"><strong>System 1 encoder</strong><span class="mono" id="lane-s1-count">0 passes</span></div>
+          <div class="lane-track" id="lane-s1"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="sequence" aria-labelledby="sequence-title">
+  <div class="section-head">
+    <p class="label">Inside one forward pass</p>
+    <h2 id="sequence-title">Every option gets its own <span class="mk" style="font-size:0.7em">[MASK]</span></h2>
+    <p>Laya serialises each question as <code>[CLS] &lt;type&gt; question: instructions [SEP] [MASK] opt0 [MASK] opt1 &hellip; [SEP] state [SEP]</code>. The options live in the input, so a new schema needs no new output layer. The question head goes first under its own token budget, so a long state is what gets cut. Edit the question and watch the budget.</p>
+  </div>
+
+  <div class="builder-grid">
+    <div class="panel stack">
+      <div class="field">
+        <label for="b-type">Question type</label>
+        <select id="b-type">
+          <option value="choice">choice: pick one option</option>
+          <option value="score">score: ordered rubric levels</option>
+          <option value="noul">noul: probability the statement is true</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="b-ins">Instructions</label>
+        <input type="text" id="b-ins">
+      </div>
+      <div class="field">
+        <label for="b-opts" id="b-opts-label">Options, one per line as key: description</label>
+        <textarea id="b-opts" rows="5"></textarea>
+      </div>
+      <div class="field">
+        <label for="b-state">State</label>
+        <textarea id="b-state" rows="4"></textarea>
+      </div>
+      <div class="slider-row"><label for="b-max">max_len</label><input type="range" id="b-max" min="96" max="512" step="16" value="512"><output id="b-max-out" for="b-max">512</output></div>
+      <div class="slider-row"><label for="b-head">head_max_len</label><input type="range" id="b-head" min="32" max="256" step="8" value="192"><output id="b-head-out" for="b-head">192</output></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>The sequence the encoder sees</h3><span class="note">approximate WordPiece tokens</span></div>
+      <div class="legend" style="margin-bottom:10px">
+        <span><i style="background:var(--tok-special)"></i>special</span>
+        <span><i style="background:var(--tok-head)"></i>instructions</span>
+        <span><i style="background:var(--marker)"></i>[MASK] marker</span>
+        <span><i style="background:var(--opt-0)"></i>option text</span>
+        <span><i style="background:var(--tok-state)"></i>state</span>
+      </div>
+      <div class="tokens" id="b-tokens" aria-label="Token sequence"></div>
+      <div class="meters">
+        <div class="meter"><span>Question head</span><div class="track" id="m-head"></div><output id="m-head-out"></output></div>
+        <div class="meter"><span>Whole sequence</span><div class="track" id="m-total"></div><output id="m-total-out"></output></div>
+      </div>
+      <p class="warnline" id="b-warn" hidden></p>
+
+      <div style="margin-top:16px">
+        <div class="panel-head" style="margin-bottom:4px"><h3>Step through the model</h3><div class="row"><button class="ghost" id="pipe-prev" type="button">Back</button><button id="pipe-next" type="button">Next stage</button></div></div>
+        <div class="pipe" id="pipe" role="list"></div>
+        <div class="stage-detail" id="pipe-detail" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="rlcd" aria-labelledby="rlcd-title">
+  <div class="section-head">
+    <p class="label">Training signal</p>
+    <h2 id="rlcd-title">RLCD: rewarding honest probabilities</h2>
+    <p>Reinforcement learning for calibrated decisions treats the logits as the mean of a Gaussian policy. Each step samples a group of noisy logit vectors, turns each into a reported distribution, and scores it with a <em>strictly proper scoring rule</em> against the observed outcome. The rule's expected reward is highest only when the report equals the true outcome distribution. Samples that beat their group's average are reinforced. This playground uses the same estimator as <code>rlcd_loss</code> in this repo: zero-mean noise, a group of 4, a normalised group-mean advantage.</p>
+  </div>
+
+  <div class="split">
+    <div class="panel stack">
+      <div class="panel-head" style="margin-bottom:0"><h3>1 &middot; Score one report</h3><span class="note">a 3-option question</span></div>
+      <p class="note">Set the true outcome distribution (what annotators said), then the model's report. The honest report always earns the most.</p>
+      <div id="psr-sliders" class="stack" style="gap:8px"></div>
+      <div class="row" style="gap:6px"><input type="checkbox" id="psr-ordinal"><label for="psr-ordinal" class="note" style="color:var(--ink-2)">Treat as a <code>score</code> question (adds the ranked probability score)</label></div>
+      <div class="cards2" style="gap:10px">
+        <dl class="kv" id="psr-kv"></dl>
+        <div><span class="label">Total reward</span><div class="reward-big" id="psr-total">0</div><div class="note" id="psr-best"></div></div>
+      </div>
+      <button class="ghost" id="psr-honest" type="button">Report honestly</button>
+    </div>
+
+    <div class="panel stack">
+      <div class="panel-head" style="margin-bottom:0"><h3>2 &middot; Train with group sampling</h3><span class="note mono" id="pg-step">step 0</span></div>
+      <div class="slider-row"><label for="pg-sigma">noise &sigma;</label><input type="range" id="pg-sigma" min="0.05" max="1" step="0.05" value="0.4"><output id="pg-sigma-out" for="pg-sigma">0.40</output></div>
+      <div class="slider-row"><label for="pg-lr">learning rate</label><input type="range" id="pg-lr" min="0.01" max="0.3" step="0.01" value="0.08"><output id="pg-lr-out" for="pg-lr">0.08</output></div>
+      <div class="row" style="gap:6px"><input type="checkbox" id="pg-ce"><label for="pg-ce" class="note" style="color:var(--ink-2)">Add soft cross-entropy guidance (Laya uses weight 1.0)</label></div>
+      <div>
+        <span class="label">Policy softmax(logits) vs target</span>
+        <div class="bars" id="pg-bars"></div>
+      </div>
+      <div>
+        <span class="label">This step's group of 4 noisy samples</span>
+        <div class="samples" id="pg-samples" style="margin-top:6px"></div>
+      </div>
+      <svg class="chart" id="pg-chart" viewBox="0 0 520 150" role="img" aria-label="KL divergence from target over training steps"></svg>
+      <div class="row">
+        <button id="pg-one" type="button">One step</button>
+        <button class="ghost" id="pg-run" type="button">Run 150 steps</button>
+        <button class="ghost" id="pg-reset" type="button">Reset</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="calibration" aria-labelledby="calibration-title">
+  <div class="split">
+    <div class="stack">
+      <p class="label">After training</p>
+      <h2 id="calibration-title">One temperature per question type</h2>
+      <p>Raw decision models are usually overconfident. Laya reports an expected calibration error (ECE) of 0.213 before scaling and 0.081 after. The fix is one scalar per question type: divide the logits by <code>T</code> before the softmax. A value of <code>T</code> above 1 softens every answer. The argmax never changes, so accuracy is untouched.</p>
+      <p>Fit <code>T</code> on held-out <em>cases</em> that never entered training. On training items the model is already near-certain and near-correct, so a temperature fitted there measures fit, not calibration.</p>
+      <p class="note">The data here is a simulated overconfident model: 2,000 four-option questions whose logits are 2.2&times; too sharp. Our real run's reliability diagrams are in the next section.</p>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3>Reliability diagram</h3><span class="note mono" id="cal-ece"></span></div>
+      <svg class="chart" id="cal-chart" viewBox="0 0 420 330" role="img" aria-label="Reliability diagram"></svg>
+      <div class="slider-row" style="margin-top:10px"><label for="cal-t">temperature T</label><input type="range" id="cal-t" min="0.5" max="4" step="0.05" value="1"><output id="cal-t-out" for="cal-t">1.00</output></div>
+      <div class="row" style="margin-top:10px"><button id="cal-fit" type="button">Fit T on held-out half</button><span class="note" id="cal-fit-note"></span></div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="runs" aria-labelledby="runs-title">
+  <div class="section-head">
+    <p class="label">Our reproduction</p>
+    <h2 id="runs-title">Training a pretrained encoder on typed-decisions</h2>
+    <p>The <a href="https://github.com/MANUJMEHROTRA/jev-experimentation/blob/main/notebooks/train_jev_style_decision_model.ipynb">notebook</a> fine-tunes an off-the-shelf encoder on <a href="https://huggingface.co/datasets/LocalLLaMA/typed-decisions">LocalLLaMA/typed-decisions</a>, the benchmark Laya reports against Jev on. It has 1,200 training cases, 400 test cases, and five typed questions per case with soft multi-annotator gold. Each full run of the notebook exports its metrics to <code>docs/assets/runs/</code>, and this section charts them next to the baselines and the published numbers.</p>
+  </div>
+  <div class="chips" role="group" aria-label="Training run" id="run-chips"></div>
+  <p class="note" id="runs-status" style="margin-top:10px">Loading run results&hellip;</p>
+  <div id="runs-body" hidden>
+    <div class="cards3" style="margin-top:16px" id="run-facts"></div>
+    <div class="table-wrap" style="margin-top:18px">
+      <table id="run-table"></table>
+    </div>
+    <div class="cards2" style="margin-top:18px">
+      <div class="panel">
+        <div class="panel-head"><h3>Test accuracy against reference points</h3><span class="note">2,000 test decisions</span></div>
+        <svg class="chart" id="run-compare" viewBox="0 0 520 260" role="img" aria-label="Accuracy compared with published numbers"></svg>
+        <div class="legend" style="margin-top:6px"><span><i style="background:var(--series-1)"></i>this repository's runs</span><span><i style="background:var(--reference)"></i>publisher-reported</span></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>Training curve</h3><span class="note">soft cross-entropy, smoothed</span></div>
+        <svg class="chart" id="run-curve" viewBox="0 0 520 260" role="img" aria-label="Training loss curve"></svg>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>Reliability, raw vs calibrated</h3><span class="note" id="run-temps"></span></div>
+        <svg class="chart" id="run-reliability" viewBox="0 0 520 300" role="img" aria-label="Reliability diagram of the trained model"></svg>
+        <div class="legend" style="margin-top:6px"><span><i style="background:var(--reference)"></i>raw</span><span><i style="background:var(--series-1)"></i>temperature-scaled</span></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>A request on an unseen schema</h3><span class="note" id="run-demo-latency"></span></div>
+        <div class="answers" id="run-demo" style="margin-top:0"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="build" aria-labelledby="build-title">
+  <div class="split">
+    <div class="stack">
+      <p class="label">Nuts and bolts</p>
+      <h2 id="build-title">Build one yourself</h2>
+      <p>The <code>jev_experimentation</code> package splits the model into small, tested modules. The notebook walks through them in order.</p>
+      <ol class="code-steps">
+        <li><strong>serialization.py</strong>: renders options and builds the marker sequence within the head and total budgets.</li>
+        <li><strong>model.py</strong>: <code>MarkerDecisionModel</code> = encoder + type embedding + 2-layer head + marker gather + MLP scorer + per-type temperature. Also keeps the cross-encoder baseline.</li>
+        <li><strong>rlcd.py</strong>: proper scoring reward, Gaussian group sampling, REINFORCE with a group baseline, plus soft cross-entropy.</li>
+        <li><strong>calibration.py</strong>: per-type temperature fitting, ECE, reliability bins, accuracy, soft accuracy and Brier score.</li>
+        <li><strong>data.py</strong> and <strong>agent.py</strong>: load typed-decisions, split by case, and expose <code>DecisionAgent.predict(state, questions)</code>.</li>
+      </ol>
+      <div class="row">
+        <a href="https://github.com/MANUJMEHROTRA/jev-experimentation">Repository</a>
+        <a href="https://colab.research.google.com/github/MANUJMEHROTRA/jev-experimentation/blob/main/notebooks/train_jev_style_decision_model.ipynb">Open the notebook in Colab</a>
+        <a href="https://github.com/MANUJMEHROTRA/jev-experimentation/blob/main/docs/model-study.md">Sourced study</a>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3>Use a trained model</h3><button class="ghost" id="copy-code" type="button">Copy</button></div>
+<pre id="usage-code">from transformers import AutoTokenizer
+from jev_experimentation import DecisionAgent, MarkerDecisionModel
+
+path = "outputs/ModernBERT-base/model"
+model = MarkerDecisionModel.load_pretrained(path)
+tokenizer = AutoTokenizer.from_pretrained(f"{path}/tokenizer")
+agent = DecisionAgent(model, tokenizer)
+
+result = agent.predict(
+    {"body": "We were billed twice for March. Refund it today."},
+    {
+        "department": {"type": "choice",
+                       "instructions": "Which team should handle this?",
+                       "criteria": {"billing": "invoices, refunds",
+                                    "technical": "bugs, outages"}},
+        "urgency": {"type": "score", "instructions": "How urgent?",
+                    "criteria": ["not urgent", "soon", "blocking"]},
+        "refund": {"type": "noul",
+                   "instructions": "The customer asks for a refund."},
+    },
+)
+result["answers"]["department"]["choice"]   # e.g. "billing"
+result["answers"]["refund"]["noul"]          # P(true)</pre>
+    </div>
+  </div>
+
+  <div style="margin-top:36px" class="stack">
+    <h3>Sources and limits</h3>
+    <ul class="sources">
+      <li><a href="https://huggingface.co/convaiinnovations/laya">Laya model card</a> and <a href="https://github.com/NandhaKishorM/laya">repository</a>: architecture, checkpoints, benchmarks, limitations. The marker layout and RLCD loss here follow its released <code>laya/common.py</code> and fine-tuning notebook (Apache-2.0).</li>
+      <li><a href="https://docs.typesafe.ai/concepts/system-one">TypeSafe System One docs</a> and <a href="https://docs.typesafe.ai/introduction/machine-learning-primer">ML primer</a>: Jev's interface and RLCD's goal. Jev's weights, architecture and training recipe are not public, so nothing on this page claims to reproduce Jev itself.</li>
+      <li>Jev pricing and launch dates come from third-party coverage (AI/ML API listing, DataCamp). All benchmark and latency figures not from "our runs" are publisher-reported, measured under different conditions.</li>
+      <li>Laya documents its own weak spots: the <code>score</code> primitive is weakest, accuracy collapses beyond about 50 options, <code>noul</code> can follow its option labels instead of the state, and the act/escalate head carries no usable signal yet.</li>
+    </ul>
+    <p class="note">Sources checked 3 October 2026.</p>
+  </div>
+</section>
+
+<footer>
+  <span>jev-experimentation &middot; a study reproduction, not affiliated with TypeSafe or Convai Innovations.</span>
+  <span>Code: MIT &middot; Laya-derived design: Apache-2.0</span>
+</footer>
+</div>
+
+<div class="tip" id="tip" hidden></div>
+
+<script>
+(() => {
+"use strict";
+const $ = (s, el = document) => el.querySelector(s);
+const NS = "http://www.w3.org/2000/svg";
+const fmt = (v, d = 3) => (v == null || Number.isNaN(v) ? "n/a" : Number(v).toFixed(d));
+const pct = v => `${Math.round(v * 100)}%`;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* ---------- tooltip ---------- */
+const tip = $("#tip");
+function bindTip(el, text) {
+  el.addEventListener("pointermove", e => {
+    tip.textContent = text; tip.hidden = false;
+    const x = Math.min(e.clientX + 14, window.innerWidth - tip.offsetWidth - 8);
+    tip.style.left = `${x}px`; tip.style.top = `${e.clientY + 14}px`;
+  });
+  el.addEventListener("pointerleave", () => { tip.hidden = true; });
+}
+function svgEl(tag, attrs = {}, parent) {
+  const el = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  if (parent) parent.appendChild(el);
+  return el;
+}
+function text(parent, x, y, str, attrs = {}) {
+  const t = svgEl("text", { x, y, ...attrs }, parent);
+  t.textContent = str;
+  return t;
+}
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+/* ---------- toy tokenizer & scorer ---------- */
+const STOP = new Set("a an the and or of to in on for is are was were be it this that with as at by from we our you your i me my do does not no yes any all if than then into out up so".split(" "));
+function wordpieces(str) {
+  const out = [];
+  for (const m of String(str).toLowerCase().matchAll(/[a-z0-9]+|[^\sa-z0-9]/g)) {
+    const w = m[0];
+    if (w.length <= 7 || !/[a-z]/.test(w)) { out.push(w); continue; }
+    out.push(w.slice(0, 5));
+    for (let rest = w.slice(5); rest.length; rest = rest.slice(4)) out.push("##" + rest.slice(0, 4));
+  }
+  return out;
+}
+function contentWords(str) {
+  return (String(str).toLowerCase().match(/[a-z]+/g) || []).filter(w => w.length > 2 && !STOP.has(w)).map(w => w.slice(0, 5));
+}
+function softmax(z) {
+  const m = Math.max(...z); const e = z.map(v => Math.exp(v - m)); const s = e.reduce((a, b) => a + b, 0);
+  return e.map(v => v / s);
+}
+function optionList(q) {
+  if (q.type === "choice") return Object.entries(q.criteria).map(([k, d]) => ({ key: k, text: d ? `${k}: ${d}` : k }));
+  if (q.type === "score") return q.criteria.map((d, i) => ({ key: String(i), text: `level ${i}: ${d}` }));
+  const c = q.criteria || {};
+  return [
+    { key: "false", text: `false: ${c.false || "no, the statement does not hold"}` },
+    { key: "true", text: `true: ${c.true || "yes, the statement holds"}` },
+  ];
+}
+function toyScore(state, q) {
+  const stateWords = new Set(contentWords(typeof state === "string" ? state : JSON.stringify(state)));
+  const overlap = str => contentWords(str).filter(w => stateWords.has(w)).length;
+  const opts = optionList(q);
+  let logits;
+  if (q.type === "noul") {
+    const hits = overlap(q.instructions);
+    logits = [0.6, -0.9 + 1.1 * hits];
+  } else {
+    logits = opts.map(o => 1.3 * overlap(o.text));
+  }
+  return { opts, probs: softmax(logits) };
+}
+function decide(state, questions) {
+  const answers = {};
+  for (const [id, q] of Object.entries(questions)) {
+    const { opts, probs } = toyScore(state, q);
+    const probabilities = Object.fromEntries(opts.map((o, i) => [o.key, +probs[i].toFixed(4)]));
+    const top = probs.indexOf(Math.max(...probs));
+    if (q.type === "choice") answers[id] = { choice: opts[top].key, probabilities, confidence: +probs[top].toFixed(4) };
+    else if (q.type === "score") answers[id] = { score: +probs.reduce((s, p, i) => s + p * i, 0).toFixed(3), probabilities, confidence: +probs[top].toFixed(4) };
+    else answers[id] = { noul: +probs[1].toFixed(4), confidence: +Math.max(probs[1], 1 - probs[1]).toFixed(4) };
+  }
+  return answers;
+}
+function renderAnswers(container, questions, answers) {
+  container.innerHTML = "";
+  for (const [id, a] of Object.entries(answers)) {
+    const q = questions[id];
+    const type = q ? q.type : (a.type || ("noul" in a ? "noul" : "score" in a ? "score" : "choice"));
+    const div = document.createElement("div");
+    div.className = "answer";
+    let value;
+    if (type === "choice") value = `${esc(a.choice)} · ${pct(a.confidence)}`;
+    else if (type === "score") value = `score ${fmt(a.score, 2)}`;
+    else value = `P(true) ${fmt(a.noul, 2)}`;
+    div.innerHTML = `<div class="answer-head"><span class="q"><span class="type-tag">${type}</span>${esc(id)}</span><span class="answer-value">${value}</span></div>`;
+    let probs = a.probabilities;
+    if (type === "noul") probs = { false: 1 - a.noul, true: a.noul };
+    if (probs) {
+      const bars = document.createElement("div");
+      bars.className = "bars";
+      const entries = Object.entries(probs);
+      const max = Math.max(...entries.map(e => e[1]));
+      for (const [k, p] of entries) {
+        let name = k;
+        if (type === "score" && q) name = `${k} · ${q.criteria[+k]}`;
+        const row = document.createElement("div");
+        row.className = "bar" + (p === max ? " best" : "");
+        row.innerHTML = `<span class="name" title="${esc(name)}">${esc(name)}</span><span class="track"><span class="fill" style="width:0"></span></span><span class="pct">${pct(p)}</span>`;
+        bars.appendChild(row);
+        requestAnimationFrame(() => { row.querySelector(".fill").style.width = `${(p * 100).toFixed(1)}%`; });
+      }
+      div.appendChild(bars);
+    }
+    container.appendChild(div);
+  }
+}
+
+/* ---------- hero demo ---------- */
+const PRESETS = {
+  "Support ticket": {
+    state: { subject: "Charged twice", body: "Hi, we were billed twice for March. Please refund the duplicate payment today or we will cancel our plan." },
+    questions: {
+      department: { type: "choice", instructions: "Which department should handle this?", criteria: { billing: "invoices, payments, refunds, charges", technical: "bugs, outages, errors, login", other: "everything else" } },
+      urgency: { type: "score", instructions: "How urgent is this?", criteria: ["not urgent, can wait", "soon, within the week", "today, blocking or threatening to cancel"] },
+      churn_risk: { type: "noul", instructions: "Does the customer threaten to cancel or leave?" },
+    },
+  },
+  "Agent trace": {
+    state: { task: "Rotate the API keys for the staging cluster", trace_summary: { steps: 9, tool_errors: 0, irreversible_actions: 1, constraint_violations: 1 }, note: "agent deleted production keys outside scope" },
+    questions: {
+      outcome: { type: "choice", instructions: "How did this agent run turn out?", criteria: { success: "completed the task correctly", partial: "progress but incomplete", harmful: "caused damage, deleted data or violated a constraint", failure: "did not accomplish the task" } },
+      risk: { type: "score", instructions: "How risky was the behaviour?", criteria: ["benign, read-only", "low, routine writes", "moderate, irreversible or out of scope", "high, destructive production violation"] },
+      needs_review: { type: "noul", instructions: "A human should review this agent trace.", criteria: { false: "No human attention is warranted.", true: "A human should inspect this run." } },
+    },
+  },
+  "Security alert": {
+    state: "Alert: 340 failed SSH logins from one external IP in 5 minutes, followed by a successful login for user deploy and a new cron job.",
+    questions: {
+      category: { type: "choice", instructions: "What kind of incident is this?", criteria: { brute_force: "repeated failed logins, password guessing", phishing: "email lure, credential link", malware: "malicious binary, ransomware", benign: "expected activity" } },
+      severity: { type: "score", instructions: "How severe is it?", criteria: ["informational", "low", "high, possible compromise", "critical, confirmed compromise with persistence like a cron job"] },
+      escalate: { type: "noul", instructions: "Escalate: a successful login after failed logins suggests compromise." },
+    },
+  },
+};
+let currentPreset = "Support ticket";
+const chipsEl = $("#preset-chips");
+for (const name of Object.keys(PRESETS)) {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "chip"; b.textContent = name;
+  b.setAttribute("aria-pressed", String(name === currentPreset));
+  b.addEventListener("click", () => {
+    currentPreset = name;
+    chipsEl.querySelectorAll(".chip").forEach(c => c.setAttribute("aria-pressed", String(c.textContent === name)));
+    loadPreset(); runDemo();
+  });
+  chipsEl.appendChild(b);
+}
+function loadPreset() {
+  const s = PRESETS[currentPreset].state;
+  $("#demo-state").value = typeof s === "string" ? s : JSON.stringify(s, null, 1);
+}
+function runDemo() {
+  const raw = $("#demo-state").value;
+  let state = raw;
+  try { state = JSON.parse(raw); } catch (_) { /* plain text state */ }
+  const questions = PRESETS[currentPreset].questions;
+  const answers = decide(state, questions);
+  renderAnswers($("#demo-answers"), questions, answers);
+  const tokens = wordpieces(raw).length;
+  const response = { answers: Object.fromEntries(Object.entries(answers).map(([k, v]) => [k, { type: questions[k].type, ...v }])), usage: { input_tokens: tokens, output_tokens: 0 } };
+  $("#demo-json").textContent = `POST /v1/systemone\n${JSON.stringify({ state, questions }, null, 1)}\n\n→ ${JSON.stringify(response, null, 1)}`;
+}
+$("#demo-run").addEventListener("click", runDemo);
+loadPreset(); runDemo();
+
+/* ---------- landscape charts ---------- */
+function groupedBars(svg, groups, series, opts = {}) {
+  svg.innerHTML = "";
+  const W = 520, left = opts.left || 130, right = 50, top = 8, rowH = opts.rowH || 64, barH = 16, gap = 4;
+  const H = top + groups.length * rowH + 26;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const max = opts.max || 1;
+  const x = v => left + (v / max) * (W - left - right);
+  for (const t of opts.ticks || [0, 0.25, 0.5, 0.75, 1]) {
+    svgEl("line", { x1: x(t), x2: x(t), y1: top, y2: H - 22, class: "grid" }, svg);
+    text(svg, x(t), H - 6, opts.tickFmt ? opts.tickFmt(t) : t, { "text-anchor": "middle" });
+  }
+  groups.forEach((g, gi) => {
+    const y0 = top + gi * rowH + 6;
+    text(svg, 0, y0 + barH + 2, g.label, { "font-weight": 600, fill: "var(--ink)" });
+    if (g.sub) text(svg, 0, y0 + barH + 16, g.sub);
+    series.forEach((s, si) => {
+      const v = g.values[si];
+      if (v == null) return;
+      const y = y0 + si * (barH + gap);
+      const w = Math.max(1, x(v) - left);
+      const r = svgEl("path", { d: `M${left},${y} h${w - 4} q4,0 4,4 v${barH - 8} q0,4 -4,4 h-${w - 4} z`, fill: s.color }, svg);
+      text(svg, left + w + 6, y + barH - 4, opts.valFmt ? opts.valFmt(v) : fmt(v), { class: "val" });
+      bindTip(r, `${g.label} · ${s.name}: ${opts.valFmt ? opts.valFmt(v) : fmt(v)}`);
+    });
+  });
+  svgEl("line", { x1: left, x2: left, y1: top, y2: H - 22, class: "axis" }, svg);
+}
+function drawLandscape() {
+  groupedBars($("#chart-bench"), [
+    { label: "typed-decisions", sub: "2,000 decisions", values: [0.766, 0.727] },
+    { label: "AG News", sub: "4 labels", values: [0.950, 0.910] },
+    { label: "DAIR Emotion", sub: "6 labels", values: [0.595, 0.480] },
+    { label: "Banking77", sub: "72–77 labels", values: [0.425, 0.870] },
+  ], [{ name: "Laya", color: "var(--series-1)" }, { name: "Jev", color: "var(--series-2)" }]);
+
+  const svg = $("#chart-latency");
+  svg.innerHTML = "";
+  const rows = [
+    { label: "Laya multilingual", sub: "1 question, T4", lo: 32.8, hi: 32.8, color: "var(--series-1)" },
+    { label: "Laya English", sub: "1 question, T4", lo: 39.5, hi: 39.5, color: "var(--series-1)" },
+    { label: "Laya multilingual", sub: "10 questions, one call", lo: 72.3, hi: 72.3, color: "var(--series-1)" },
+    { label: "Laya English", sub: "10 questions, one call", lo: 158.6, hi: 158.6, color: "var(--series-1)" },
+    { label: "Jev API", sub: "p50 range, network", lo: 236, hi: 276, color: "var(--series-2)" },
+  ];
+  const W = 520, left = 150, right = 70, top = 8, rowH = 52, H = top + rows.length * rowH + 26;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const x = v => left + (v / 300) * (W - left - right);
+  for (const t of [0, 100, 200, 300]) {
+    svgEl("line", { x1: x(t), x2: x(t), y1: top, y2: H - 22, class: "grid" }, svg);
+    text(svg, x(t), H - 6, `${t} ms`, { "text-anchor": "middle" });
+  }
+  rows.forEach((r, i) => {
+    const y = top + i * rowH + 10;
+    text(svg, 0, y + 12, r.label, { "font-weight": 600, fill: "var(--ink)" });
+    text(svg, 0, y + 26, r.sub);
+    const w = x(r.hi) - left;
+    const bar = svgEl("path", { d: `M${left},${y + 2} h${w - 4} q4,0 4,4 v8 q0,4 -4,4 h-${w - 4} z`, fill: r.color, opacity: r.lo === r.hi ? 1 : 0.35 }, svg);
+    if (r.lo !== r.hi) svgEl("rect", { x: x(r.lo), y: y + 2, width: x(r.hi) - x(r.lo), height: 16, fill: r.color, rx: 3 }, svg);
+    const label = r.lo === r.hi ? `${r.lo} ms` : `${r.lo}–${r.hi} ms`;
+    text(svg, x(r.hi) + 6, y + 15, label, { class: "val" });
+    bindTip(bar, `${r.label}, ${r.sub}: ${label}`);
+  });
+  svgEl("line", { x1: left, x2: left, y1: top, y2: H - 22, class: "axis" }, svg);
+}
+drawLandscape();
+
+/* ---------- lanes ---------- */
+const LLM_TOKENS = ['{"', 'department', '":', ' "', 'billing', '",', ' "', 'urgency', '":', ' 2', ',', ' "', 'churn', '_risk', '":', ' 0', '.', '86', '}'];
+let laneTimer = null;
+function playLanes() {
+  clearInterval(laneTimer);
+  const llm = $("#lane-llm"), s1 = $("#lane-s1");
+  llm.innerHTML = ""; s1.innerHTML = "";
+  $("#lane-llm-count").textContent = "0 passes"; $("#lane-s1-count").textContent = "0 passes";
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const pass = document.createElement("span");
+  pass.className = "lpass"; pass.textContent = "1 pass → 3 typed answers";
+  setTimeout(() => { s1.appendChild(pass); $("#lane-s1-count").textContent = "1 pass"; }, reduce ? 0 : 160);
+  let i = 0;
+  const add = () => {
+    if (i < LLM_TOKENS.length) {
+      const t = document.createElement("span"); t.className = "ltok"; t.textContent = LLM_TOKENS[i].replace(/ /g, "·");
+      llm.appendChild(t); i++;
+      $("#lane-llm-count").textContent = `${i} passes`;
+    } else {
+      const p = document.createElement("span"); p.className = "ltok parse"; p.textContent = "parse + validate JSON";
+      llm.appendChild(p); clearInterval(laneTimer);
+    }
+  };
+  if (reduce) { while (i <= LLM_TOKENS.length) add(); return; }
+  laneTimer = setInterval(add, 140);
+}
+$("#lanes-replay").addEventListener("click", playLanes);
+playLanes();
+
+/* ---------- sequence builder ---------- */
+const OPTION_TOKEN_CAP = 48;
+const DEFAULT_OPTS = {
+  choice: "billing: invoices, payments, refunds\ntechnical: bugs, outages, system errors\naccount: login, profile, access\nother: everything else",
+  score: "not urgent\nsoon, within the week\nblocking, needs action today",
+  noul: "false: the customer does not ask for money back\ntrue: the customer asks for a refund",
+};
+const DEFAULT_INS = { choice: "Which department should handle this ticket?", score: "How urgent is this ticket?", noul: "The customer explicitly requests a refund." };
+const bType = $("#b-type"), bIns = $("#b-ins"), bOpts = $("#b-opts"), bState = $("#b-state"), bMax = $("#b-max"), bHead = $("#b-head");
+bState.value = '{"subject": "Duplicate charge", "body": "Hi team, our March invoice was charged twice on the company card. Please refund the duplicate payment as soon as possible. We have been customers for four years and this is the second billing problem this quarter."}';
+function setTypeDefaults() {
+  bIns.value = DEFAULT_INS[bType.value];
+  bOpts.value = DEFAULT_OPTS[bType.value];
+  $("#b-opts-label").textContent = bType.value === "score" ? "Rubric levels, lowest first, one per line" : bType.value === "noul" ? "Optional false/true descriptions" : "Options, one per line as key: description";
+}
+function builderQuestion() {
+  const lines = bOpts.value.split("\n").map(l => l.trim()).filter(Boolean);
+  const t = bType.value;
+  if (t === "choice") {
+    const criteria = {};
+    for (const l of lines) { const i = l.indexOf(":"); if (i > 0) criteria[l.slice(0, i).trim()] = l.slice(i + 1).trim(); else criteria[l] = ""; }
+    return { type: t, instructions: bIns.value, criteria };
+  }
+  if (t === "score") return { type: t, instructions: bIns.value, criteria: lines };
+  const criteria = {};
+  for (const l of lines) { const m = l.match(/^(true|false)\s*:\s*(.*)$/i); if (m) criteria[m[1].toLowerCase()] = m[2]; }
+  return { type: t, instructions: bIns.value, criteria };
+}
+let seqInfo = null;
+function buildSequence() {
+  const q = builderQuestion();
+  const maxLen = +bMax.value, headMax = Math.min(+bHead.value, maxLen - 16);
+  $("#b-max-out").textContent = maxLen; $("#b-head-out").textContent = headMax;
+  const opts = optionList(q);
+  const warn = $("#b-warn");
+  if (!opts.length) { $("#b-tokens").textContent = "Add at least one option."; warn.hidden = true; return; }
+  let insToks = wordpieces(`${q.type} question: ${q.instructions}`);
+  let optToks = opts.map(o => ["[MASK]", ...wordpieces(" " + o.text).slice(0, OPTION_TOKEN_CAP)]);
+  let budget = headMax - optToks.reduce((s, o) => s + o.length, 0);
+  let perOption = null;
+  if (budget < 16) {
+    perOption = Math.max(4, Math.floor((headMax - 16) / optToks.length));
+    optToks = optToks.map(o => o.slice(0, perOption));
+    budget = headMax - optToks.reduce((s, o) => s + o.length, 0);
+  }
+  const insKept = insToks.slice(0, Math.max(8, budget));
+  const seq = [{ t: "[CLS]", c: "sp" }, ...insKept.map(t => ({ t, c: "hd" })), { t: "[SEP]", c: "sp" }];
+  const markers = [];
+  optToks.forEach((o, oi) => {
+    markers.push(seq.length);
+    o.forEach((t, j) => seq.push({ t, c: j === 0 ? "mask" : `o${oi % 5}` }));
+  });
+  seq.push({ t: "[SEP]", c: "sp" });
+  const headLen = seq.length;
+  const stateToks = wordpieces(bState.value);
+  const room = Math.max(0, maxLen - headLen - 1);
+  stateToks.forEach((t, i) => seq.push({ t, c: i < room ? "st" : "st cut" }));
+  seq.push({ t: "[SEP]", c: "sp" });
+
+  const box = $("#b-tokens");
+  box.innerHTML = "";
+  const frag = document.createDocumentFragment();
+  seq.forEach((s, i) => {
+    const span = document.createElement("span");
+    span.className = "t " + s.c.split(" ").map(c => c === "st" ? "" : c).join(" ");
+    span.textContent = s.t;
+    if (s.c === "mask") span.title = `position ${i}: scored for option "${opts[markers.indexOf(i)].key}"`;
+    frag.appendChild(span);
+  });
+  box.appendChild(frag);
+
+  const kept = Math.min(stateToks.length, room);
+  const total = headLen + kept + 1;
+  const meter = (el, segs, cap) => {
+    el.innerHTML = "";
+    for (const [n, color] of segs) { const d = document.createElement("span"); d.className = "seg"; d.style.width = `${Math.min(100, (n / cap) * 100)}%`; d.style.background = color; el.appendChild(d); }
+  };
+  const insLen = insKept.length + 2, optLen = headLen - insLen;
+  meter($("#m-head"), [[insLen, "var(--tok-head)"], [optLen, "var(--marker)"]], headMax);
+  $("#m-head-out").textContent = `${headLen - 1} / ${headMax}`;
+  meter($("#m-total"), [[headLen, "var(--marker)"], [kept, "var(--series-1)"]], maxLen);
+  $("#m-total-out").textContent = `${total} / ${maxLen}`;
+  const msgs = [];
+  if (perOption) msgs.push(`Options squeezed to ${perOption} tokens each to fit the head budget; long descriptions lose their endings.`);
+  if (insKept.length < insToks.length) msgs.push(`Instructions cut from ${insToks.length} to ${insKept.length} tokens.`);
+  if (kept < stateToks.length) msgs.push(`${stateToks.length - kept} state tokens dropped (struck through). The options always survive.`);
+  if (new Set(optToks.map(o => o.join(" "))).size < optToks.length) msgs.push("Two options became identical after truncation; the model can no longer tell them apart.");
+  warn.hidden = !msgs.length; warn.textContent = msgs.join(" ");
+  seqInfo = { L: total, K: opts.length, type: q.type, keys: opts.map(o => o.key), headLen, kept, markers };
+  renderStage();
+}
+bType.addEventListener("change", () => { setTypeDefaults(); buildSequence(); });
+for (const el of [bIns, bOpts, bState, bMax, bHead]) el.addEventListener("input", buildSequence);
+
+const STAGES = [
+  { name: "Tokens", sub: "one row per question", shape: i => `input_ids [Q, ${i.L}]`, body: i => `The ${i.type} question becomes ${i.L} tokens: a ${i.headLen}-token head with ${i.K} [MASK] markers at positions ${i.markers.join(", ")}, then ${i.kept} state tokens. Every question about this state is one row in the same batch.` },
+  { name: "Encoder", sub: "bidirectional", shape: i => `hidden [Q, ${i.L}, d]  (d = 1024 for ModernBERT-large)`, body: () => "A pretrained bidirectional encoder contextualises every token. Because attention runs in both directions, each [MASK] marker sees the instructions, its own option text, the competing options and the state at once." },
+  { name: "+ Type", sub: "embedding", shape: i => `hidden += type_emb[${i.type}]  (3 × d table)`, body: () => "A learned vector for choice, score or noul is added to every token, so the same head can behave differently for a categorical pick, an ordinal rating or a true/false judgement." },
+  { name: "Head", sub: "2 layers", shape: i => `hidden [Q, ${i.L}, d]  (2 pre-norm transformer layers)`, body: () => "Two fresh transformer layers sit on top of the encoder. They are trained from scratch at a higher learning rate (1e-4 against 2.5e-5 for the encoder) and specialise the representation for decisions." },
+  { name: "Gather", sub: "at markers", shape: i => `marker_states [Q, ${i.K}, d]`, body: i => `Only the hidden states at the ${i.K} marker positions are kept, one per option (${i.keys.slice(0, 5).join(", ")}${i.keys.length > 5 ? ", …" : ""}). Option count is set by the request, which is why no output layer depends on the schema.` },
+  { name: "Scorer", sub: "MLP → logit", shape: i => `logits [Q, ${i.K}]`, body: () => "LayerNorm → Linear → GELU → Linear maps each marker state to one number. Padded option slots get a large negative logit so they receive zero probability." },
+  { name: "Softmax", sub: "÷ temperature", shape: i => `p = softmax(logits / T[${i.type}])`, body: i => i.type === "choice" ? "The distribution over options is the answer: choice = argmax, confidence = max p." : i.type === "score" ? "The levels form an ordered distribution: score = Σ level × p(level), and the ranked probability score trains it to respect order." : "Two markers, [false, true]: noul = p(true)." },
+];
+let stageIndex = 0;
+const pipe = $("#pipe");
+STAGES.forEach((s, i) => {
+  const d = document.createElement("div");
+  d.className = "stage"; d.setAttribute("role", "listitem"); d.tabIndex = 0;
+  d.innerHTML = `<b>${s.name}</b>${s.sub}`;
+  const go = () => { stageIndex = i; renderStage(); };
+  d.addEventListener("click", go);
+  d.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+  pipe.appendChild(d);
+});
+function renderStage() {
+  if (!seqInfo) return;
+  pipe.querySelectorAll(".stage").forEach((d, i) => { if (i === stageIndex) d.setAttribute("aria-current", "step"); else d.removeAttribute("aria-current"); });
+  const s = STAGES[stageIndex];
+  $("#pipe-detail").innerHTML = `<span class="shape">${esc(s.shape(seqInfo))}</span><p>${esc(s.body(seqInfo))}</p>`;
+}
+$("#pipe-next").addEventListener("click", () => { stageIndex = (stageIndex + 1) % STAGES.length; renderStage(); });
+$("#pipe-prev").addEventListener("click", () => { stageIndex = (stageIndex + STAGES.length - 1) % STAGES.length; renderStage(); });
+setTypeDefaults(); buildSequence();
+
+/* ---------- proper scoring rules ---------- */
+const LOG_FLOOR = -9.21;
+function reward(q, t, ordinal, wSph = 0.75, wRps = 1.0) {
+  const logS = t.reduce((s, ti, i) => s + ti * Math.max(LOG_FLOOR, Math.log(Math.max(q[i], 1e-12))), 0);
+  const norm = Math.sqrt(q.reduce((s, v) => s + v * v, 0)) || 1e-9;
+  const sph = t.reduce((s, ti, i) => s + ti * q[i], 0) / norm;
+  let rps = 0;
+  if (ordinal) {
+    let cq = 0, ct = 0;
+    for (let i = 0; i < q.length; i++) { cq += q[i]; ct += t[i]; rps += (cq - ct) ** 2; }
+    rps /= Math.max(1, q.length - 1);
+  }
+  return { log: logS, sph: wSph * sph, rps: ordinal ? -wRps * rps : 0, total: logS + wSph * sph - (ordinal ? wRps * rps : 0) };
+}
+const PSR_KEYS = ["low", "mid", "high"];
+const psr = { target: [0.6, 0.3, 0.1], report: [0.9, 0.05, 0.05] };
+function normalise(arr, fixedIndex) {
+  const v = arr.map(x => Math.max(0, x));
+  const rest = v.reduce((s, x, i) => (i === fixedIndex ? s : s + x), 0);
+  const want = 1 - v[fixedIndex];
+  return v.map((x, i) => (i === fixedIndex ? x : rest > 0 ? (x / rest) * want : want / (v.length - 1)));
+}
+function psrSliders() {
+  const box = $("#psr-sliders");
+  box.innerHTML = "";
+  for (const which of ["target", "report"]) {
+    const head = document.createElement("span");
+    head.className = "label"; head.textContent = which === "target" ? "True outcome distribution" : "Model's report";
+    box.appendChild(head);
+    PSR_KEYS.forEach((k, i) => {
+      const id = `psr-${which}-${i}`;
+      const row = document.createElement("div");
+      row.className = "slider-row";
+      row.innerHTML = `<label for="${id}">${k}</label><input type="range" id="${id}" min="0" max="1" step="0.01" value="${psr[which][i]}"><output for="${id}">${psr[which][i].toFixed(2)}</output>`;
+      row.querySelector("input").addEventListener("input", e => {
+        psr[which][i] = Math.min(0.98, Math.max(0.01, +e.target.value));
+        psr[which] = normalise(psr[which], i);
+        syncPsr();
+      });
+      box.appendChild(row);
+    });
+  }
+}
+function syncPsr() {
+  for (const which of ["target", "report"]) {
+    PSR_KEYS.forEach((_, i) => {
+      const input = $(`#psr-${which}-${i}`);
+      input.value = psr[which][i];
+      input.nextElementSibling.textContent = psr[which][i].toFixed(2);
+    });
+  }
+  const ordinal = $("#psr-ordinal").checked;
+  const r = reward(psr.report, psr.target, ordinal);
+  const best = reward(psr.target, psr.target, ordinal);
+  $("#psr-kv").innerHTML = `<dt>log score</dt><dd>${fmt(r.log)}</dd><dt>0.75 × spherical</dt><dd>${fmt(r.sph)}</dd><dt>− RPS</dt><dd>${ordinal ? fmt(r.rps) : "off"}</dd>`;
+  $("#psr-total").textContent = (r.total >= 0 ? "+" : "") + r.total.toFixed(3);
+  const gap = best.total - r.total;
+  $("#psr-best").textContent = gap < 0.0005 ? "Maximum: this report is honest." : `Honest report would earn ${best.total.toFixed(3)} (+${gap.toFixed(3)}).`;
+}
+$("#psr-ordinal").addEventListener("change", syncPsr);
+$("#psr-honest").addEventListener("click", () => { psr.report = psr.target.slice(); syncPsr(); });
+psrSliders(); syncPsr();
+
+/* ---------- policy gradient playground ---------- */
+let seed = 7;
+function rand() { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; }
+function randn() { const u = Math.max(rand(), 1e-12), v = rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+const PG_TARGET = [0.15, 0.6, 0.25];
+const PG_KEYS = ["observe", "review", "stop"];
+const pg = { mu: [0.8, -0.4, 0.2], step: 0, kl: [], samples: [] };
+function kl(t, p) { return t.reduce((s, ti, i) => s + (ti > 0 ? ti * Math.log(ti / Math.max(p[i], 1e-12)) : 0), 0); }
+function pgStep() {
+  const sigma = +$("#pg-sigma").value, lr = +$("#pg-lr").value, useCe = $("#pg-ce").checked;
+  const K = pg.mu.length, G = 4;
+  const samples = [];
+  for (let g = 0; g < G; g++) {
+    let eps = Array.from({ length: K }, () => randn() * sigma);
+    const mean = eps.reduce((a, b) => a + b, 0) / K;
+    eps = eps.map(e => e - mean);
+    const z = pg.mu.map((m, i) => m + eps[i]);
+    const q = softmax(z);
+    samples.push({ eps, q, r: reward(q, PG_TARGET, false).total });
+  }
+  const rMean = samples.reduce((s, x) => s + x.r, 0) / G;
+  const rStd = Math.sqrt(samples.reduce((s, x) => s + (x.r - rMean) ** 2, 0) / Math.max(1, G - 1));
+  samples.forEach(s => { s.adv = (s.r - rMean) / (rStd + 1e-6); });
+  const grad = new Array(K).fill(0);
+  samples.forEach(s => s.eps.forEach((e, i) => { grad[i] += -(s.adv * e) / (sigma * sigma) / G; }));
+  if (useCe) { const p = softmax(pg.mu); p.forEach((pi, i) => { grad[i] += pi - PG_TARGET[i]; }); }
+  pg.mu = pg.mu.map((m, i) => m - lr * sigma * grad[i]);
+  pg.step++; pg.samples = samples;
+  pg.kl.push(kl(PG_TARGET, softmax(pg.mu)));
+}
+function renderPg() {
+  $("#pg-step").textContent = `step ${pg.step}`;
+  $("#pg-sigma-out").textContent = (+$("#pg-sigma").value).toFixed(2);
+  $("#pg-lr-out").textContent = (+$("#pg-lr").value).toFixed(2);
+  const p = softmax(pg.mu);
+  const bars = $("#pg-bars");
+  bars.innerHTML = "";
+  PG_KEYS.forEach((k, i) => {
+    const row = document.createElement("div");
+    row.className = "bar";
+    row.innerHTML = `<span class="name">${k}</span><span class="track" style="position:relative"><span class="fill" style="width:${(p[i] * 100).toFixed(1)}%"></span><span style="position:absolute;top:-2px;bottom:-2px;left:calc(${(PG_TARGET[i] * 100).toFixed(1)}% - 1px);width:2px;background:var(--ink)"></span></span><span class="pct">${pct(p[i])}</span>`;
+    bars.appendChild(row);
+  });
+  const legend = document.createElement("div");
+  legend.className = "note"; legend.textContent = "Black tick = target probability (0.15, 0.60, 0.25).";
+  bars.appendChild(legend);
+
+  const box = $("#pg-samples");
+  box.innerHTML = "";
+  if (!pg.samples.length) { box.innerHTML = '<span class="note">Press "One step" to draw a group.</span>'; }
+  const colors = ["var(--series-1)", "var(--marker)", "var(--good)"];
+  pg.samples.forEach((s, g) => {
+    const row = document.createElement("div");
+    row.className = "sample";
+    row.innerHTML = `<span class="mono">z${g + 1}</span><span class="mini">${s.q.map((v, i) => `<span style="width:${(v * 100).toFixed(1)}%;background:${colors[i]}"></span>`).join("")}</span><span class="num">r ${s.r.toFixed(2)}</span><span class="num ${s.adv >= 0 ? "pos" : "neg"}">A ${s.adv >= 0 ? "+" : ""}${s.adv.toFixed(2)}</span>`;
+    bindTip(row, `sample ${g + 1}: ${PG_KEYS.map((k, i) => `${k} ${pct(s.q[i])}`).join(", ")}; reward ${s.r.toFixed(3)}; advantage ${s.adv.toFixed(2)}`);
+    box.appendChild(row);
+  });
+  if (pg.samples.length) {
+    const note = document.createElement("div");
+    note.className = "note";
+    note.innerHTML = `Bars: <span style="color:var(--series-1)">observe</span>, <span style="color:var(--marker)">review</span>, <span style="color:var(--good)">stop</span>. Positive advantage pulls the logits toward that sample's noise.`;
+    box.appendChild(note);
+  }
+
+  const svg = $("#pg-chart");
+  svg.innerHTML = "";
+  const W = 520, H = 150, L = 44, R = 10, T = 12, B = 24;
+  const n = Math.max(20, pg.kl.length);
+  const maxK = Math.max(0.05, ...pg.kl, kl(PG_TARGET, softmax([0.8, -0.4, 0.2])));
+  const x = i => L + (i / (n - 1)) * (W - L - R), y = v => T + (1 - v / maxK) * (H - T - B);
+  [0, maxK / 2, maxK].forEach(v => { svgEl("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), class: "grid" }, svg); text(svg, L - 6, y(v) + 4, v.toFixed(2), { "text-anchor": "end" }); });
+  text(svg, L, H - 6, "KL(target ‖ policy) by step");
+  text(svg, W - R, H - 6, `${n} steps`, { "text-anchor": "end" });
+  if (pg.kl.length > 1) {
+    const d = pg.kl.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
+    svgEl("path", { d: d + `L${x(pg.kl.length - 1)},${y(0)}L${x(0)},${y(0)}Z`, fill: "var(--series-1-soft)", opacity: 0.6 }, svg);
+    svgEl("path", { d, fill: "none", stroke: "var(--series-1)", "stroke-width": 2 }, svg);
+    const last = pg.kl.length - 1;
+    svgEl("circle", { cx: x(last), cy: y(pg.kl[last]), r: 4, fill: "var(--series-1)", stroke: "var(--surface)", "stroke-width": 2 }, svg);
+    text(svg, Math.min(x(last) + 6, W - 40), y(pg.kl[last]) - 6, pg.kl[last].toFixed(3), { class: "val" });
+  }
+}
+let pgTimer = null;
+$("#pg-one").addEventListener("click", () => { pgStep(); renderPg(); });
+$("#pg-run").addEventListener("click", () => {
+  clearInterval(pgTimer);
+  let left = 150;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reduce) { while (left--) pgStep(); renderPg(); return; }
+  pgTimer = setInterval(() => { for (let k = 0; k < 3 && left > 0; k++, left--) pgStep(); renderPg(); if (left <= 0) clearInterval(pgTimer); }, 30);
+});
+$("#pg-reset").addEventListener("click", () => { clearInterval(pgTimer); seed = 7; Object.assign(pg, { mu: [0.8, -0.4, 0.2], step: 0, kl: [], samples: [] }); renderPg(); });
+for (const id of ["#pg-sigma", "#pg-lr"]) $(id).addEventListener("input", renderPg);
+renderPg();
+
+/* ---------- calibration ---------- */
+const cal = (() => {
+  let s = 11;
+  const r = () => { s = (s * 1664525 + 1013904223) % 4294967296; return s / 4294967296; };
+  const n = () => Math.sqrt(-2 * Math.log(Math.max(r(), 1e-12))) * Math.cos(2 * Math.PI * r());
+  const rows = [];
+  for (let i = 0; i < 2000; i++) {
+    const trueLogits = [0, 0, 0, 0].map(() => n() * 1.4);
+    const p = softmax(trueLogits);
+    let u = r(), y = 0;
+    while (y < 3 && u > p[y]) { u -= p[y]; y++; }
+    rows.push({ logits: trueLogits.map(v => v * 2.2), y });
+  }
+  return rows;
+})();
+function calStats(rows, T) {
+  const bins = Array.from({ length: 10 }, () => ({ n: 0, conf: 0, acc: 0 }));
+  let nll = 0;
+  for (const r of rows) {
+    const p = softmax(r.logits.map(v => v / T));
+    const c = Math.max(...p), pred = p.indexOf(c);
+    const b = bins[Math.min(9, Math.floor(c * 10))];
+    b.n++; b.conf += c; b.acc += pred === r.y ? 1 : 0;
+    nll -= Math.log(Math.max(p[r.y], 1e-12));
+  }
+  let ece = 0;
+  bins.forEach(b => { if (b.n) { b.conf /= b.n; b.acc /= b.n; ece += (b.n / rows.length) * Math.abs(b.conf - b.acc); } });
+  return { bins, ece, nll: nll / rows.length };
+}
+function reliability(svg, sets, W = 420, H = 330) {
+  svg.innerHTML = "";
+  const L = 44, R = 12, T = 10, B = 40;
+  const x = v => L + v * (W - L - R), y = v => T + (1 - v) * (H - T - B);
+  [0, 0.25, 0.5, 0.75, 1].forEach(v => {
+    svgEl("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), class: "grid" }, svg);
+    text(svg, L - 6, y(v) + 4, v.toFixed(2), { "text-anchor": "end" });
+    text(svg, x(v), H - B + 16, v.toFixed(2), { "text-anchor": "middle" });
+  });
+  text(svg, (L + W - R) / 2, H - 6, "confidence (max probability)", { "text-anchor": "middle" });
+  text(svg, 0, 0, "accuracy", { transform: `translate(11 ${(T + H - B) / 2}) rotate(-90)`, "text-anchor": "middle" });
+  svgEl("line", { x1: x(0), y1: y(0), x2: x(1), y2: y(1), stroke: "var(--muted)", "stroke-dasharray": "4 4", "stroke-width": 1 }, svg);
+  const bw = (W - L - R) / 10;
+  sets.forEach((set, si) => {
+    const inner = (bw - 4) / sets.length;
+    set.bins.forEach((b, i) => {
+      if (!b.n) return;
+      const bx = x(i / 10) + 2 + si * inner;
+      const h = Math.max(1, y(0) - y(b.acc));
+      const d = h > 6
+        ? `M${bx},${y(0)} v-${h - 3} q0,-3 3,-3 h${inner - 6} q3,0 3,3 v${h - 3} z`
+        : `M${bx},${y(0)} v-${h} h${inner} v${h} z`;
+      const rect = svgEl("path", { d, fill: set.color, opacity: 0.85 }, svg);
+      bindTip(rect, `${set.name}: confidence ${b.conf.toFixed(2)}, accuracy ${b.acc.toFixed(2)}, ${b.n} predictions`);
+    });
+    const pts = set.bins.filter(b => b.n);
+    if (pts.length > 1) svgEl("path", { d: pts.map((b, i) => `${i ? "L" : "M"}${x(b.conf)},${y(b.acc)}`).join(""), fill: "none", stroke: set.color, "stroke-width": 2 }, svg);
+    pts.forEach(b => svgEl("circle", { cx: x(b.conf), cy: y(b.acc), r: 4, fill: set.color, stroke: "var(--surface)", "stroke-width": 2 }, svg));
+  });
+  svgEl("line", { x1: L, x2: L, y1: T, y2: y(0), class: "axis" }, svg);
+  svgEl("line", { x1: L, x2: W - R, y1: y(0), y2: y(0), class: "axis" }, svg);
+}
+const calHeld = cal.slice(1000), calFit = cal.slice(0, 1000);
+function renderCal() {
+  const T = +$("#cal-t").value;
+  $("#cal-t-out").textContent = T.toFixed(2);
+  const st = calStats(calHeld, T);
+  $("#cal-ece").textContent = `ECE ${st.ece.toFixed(3)} · NLL ${st.nll.toFixed(3)}`;
+  reliability($("#cal-chart"), [{ name: `T = ${T.toFixed(2)}`, color: "var(--series-1)", bins: st.bins }]);
+}
+$("#cal-t").addEventListener("input", renderCal);
+$("#cal-fit").addEventListener("click", () => {
+  let lo = Math.log(0.5), hi = Math.log(5);
+  const f = lt => calStats(calFit, Math.exp(lt)).nll;
+  for (let i = 0; i < 40; i++) { const a = lo + (hi - lo) * 0.382, b = lo + (hi - lo) * 0.618; if (f(a) < f(b)) hi = b; else lo = a; }
+  const T = Math.exp((lo + hi) / 2);
+  $("#cal-t").value = T.toFixed(2);
+  $("#cal-fit-note").textContent = `Fitted T = ${T.toFixed(2)} on the other 1,000 questions (the simulation used 2.2).`;
+  renderCal();
+});
+renderCal();
+
+/* ---------- our runs ---------- */
+function lineChart(svg, series, opts) {
+  svg.innerHTML = "";
+  const W = 520, H = 260, L = 46, R = 14, T = 10, B = 34;
+  const all = series.flatMap(s => s.points);
+  if (!all.length) return;
+  const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  let y0 = Math.min(...ys), y1 = Math.max(...ys);
+  const pad = (y1 - y0) * 0.1 || 0.1; y0 -= pad; y1 += pad;
+  const x = v => L + ((v - x0) / Math.max(1e-9, x1 - x0)) * (W - L - R), y = v => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+  for (let i = 0; i <= 4; i++) { const v = y0 + (i / 4) * (y1 - y0); svgEl("line", { x1: L, x2: W - R, y1: y(v), y2: y(v), class: "grid" }, svg); text(svg, L - 6, y(v) + 4, v.toFixed(2), { "text-anchor": "end" }); }
+  text(svg, L, H - 8, `${opts.xLabel} ${Math.round(x0)}`, {});
+  text(svg, W - R, H - 8, `${Math.round(x1)}`, { "text-anchor": "end" });
+  series.forEach(s => {
+    if (s.points.length < 2) return;
+    const d = s.points.map((p, i) => `${i ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join("");
+    svgEl("path", { d, fill: "none", stroke: s.color, "stroke-width": 2 }, svg);
+    const last = s.points[s.points.length - 1];
+    svgEl("circle", { cx: x(last[0]), cy: y(last[1]), r: 4, fill: s.color, stroke: "var(--surface)", "stroke-width": 2 }, svg);
+    text(svg, x(last[0]) - 6, y(last[1]) - 8, `${s.name} ${last[1].toFixed(3)}`, { "text-anchor": "end", class: "val" });
+  });
+  const hit = svgEl("rect", { x: L, y: T, width: W - L - R, height: H - T - B, fill: "transparent" }, svg);
+  const cross = svgEl("line", { y1: T, y2: H - B, stroke: "var(--muted)", "stroke-width": 1, visibility: "hidden" }, svg);
+  hit.addEventListener("pointermove", e => {
+    const box = svg.getBoundingClientRect();
+    const vx = x0 + ((e.clientX - box.left) * (W / box.width) - L) / (W - L - R) * (x1 - x0);
+    const parts = series.map(s => { let best = s.points[0]; for (const p of s.points) if (Math.abs(p[0] - vx) < Math.abs(best[0] - vx)) best = p; return [s.name, best]; });
+    cross.setAttribute("x1", x(parts[0][1][0])); cross.setAttribute("x2", x(parts[0][1][0])); cross.setAttribute("visibility", "visible");
+    tip.textContent = `${opts.xLabel} ${Math.round(parts[0][1][0])}: ` + parts.map(([n, p]) => `${n} ${p[1].toFixed(3)}`).join(", ");
+    tip.hidden = false; tip.style.left = `${Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8)}px`; tip.style.top = `${e.clientY + 14}px`;
+  });
+  hit.addEventListener("pointerleave", () => { tip.hidden = true; cross.setAttribute("visibility", "hidden"); });
+}
+function smooth(values, w = 15) { const out = []; let s = 0; values.forEach((v, i) => { s += v; if (i >= w) s -= values[i - w]; out.push(s / Math.min(i + 1, w)); }); return out; }
+
+const ROW_LABELS = { majority: "Majority label per question", prior: "Training-set prior distribution", untrained: "Encoder + untrained head", "trained (raw)": "Trained, raw", "trained (calibrated)": "Trained, temperature-scaled" };
+let runs = [];
+function renderRun(run) {
+  const res = run.results;
+  const shortEnc = run.encoder.split("/").pop();
+  $("#run-facts").innerHTML = [
+    [`${fmt(res["trained (calibrated)"].overall.accuracy)}`, `test accuracy, ${shortEnc} + ${run.objective.toUpperCase()}`],
+    [`${fmt(run.parameters_m, 0)}M`, "parameters, encoder + decision head"],
+    [`${fmt(run.train_minutes, 0)} min`, `${run.epochs} epochs on ${run.device}, ${run.decisions.train.toLocaleString()} training decisions`],
+  ].map(([v, s]) => `<div class="fact"><strong>${v}</strong><span>${esc(s)}</span></div>`).join("");
+
+  const cols = [["accuracy", "Accuracy"], ["soft_accuracy", "Soft acc."], ["brier", "Brier ↓"], ["ece", "ECE ↓"]];
+  const types = ["choice", "score", "noul"];
+  let html = `<thead><tr><th>Model</th>${cols.map(c => `<th class="num">${c[1]}</th>`).join("")}${types.map(t => `<th class="num">${t} acc.</th>`).join("")}</tr></thead><tbody>`;
+  for (const [key, label] of Object.entries(ROW_LABELS)) {
+    const m = res[key]; if (!m) continue;
+    html += `<tr class="${key.startsWith("trained") ? "ours" : ""}"><td>${label}</td>${cols.map(c => `<td class="num">${fmt(m.overall[c[0]])}</td>`).join("")}${types.map(t => `<td class="num">${m[t] && m[t].n ? fmt(m[t].accuracy) : "–"}</td>`).join("")}</tr>`;
+  }
+  $("#run-table").innerHTML = html + "</tbody>";
+
+  const pub = run.published || {};
+  const groups = [
+    ...Object.entries(pub).map(([k, v]) => ({ label: k.replace(/ \(.*\)/, ""), sub: (k.match(/\((.*)\)/) || [])[1] || "", values: [null, v] })),
+    ...runs.map(r => ({ label: `${r.encoder.split("/").pop()}`, sub: `${r.objective.toUpperCase()}, this repo`, values: [r.results["trained (calibrated)"].overall.accuracy, null] })),
+  ].sort((a, b) => (b.values[0] ?? b.values[1]) - (a.values[0] ?? a.values[1]));
+  groupedBars($("#run-compare"), groups, [{ name: "this repo", color: "var(--series-1)" }, { name: "published", color: "var(--reference)" }], { left: 170, rowH: 40 });
+
+  const hist = run.history || [];
+  lineChart($("#run-curve"), [{ name: "soft CE", color: "var(--series-1)", points: smooth(hist.map(h => h.cross_entropy)).map((v, i) => [hist[i].step, v]) }], { xLabel: "step" });
+
+  const toSet = (name, color, rel) => ({ name, color, bins: rel.map(b => ({ n: b.count, conf: b.confidence ?? 0, acc: b.accuracy ?? 0 })) });
+  reliability($("#run-reliability"), [
+    toSet("raw", "var(--reference)", res["trained (raw)"].reliability),
+    toSet("scaled", "var(--series-1)", res["trained (calibrated)"].reliability),
+  ], 520, 300);
+  const t = run.temperatures;
+  $("#run-temps").textContent = `T: choice ${fmt(t.choice, 2)}, score ${fmt(t.score, 2)}, noul ${fmt(t.noul, 2)} · ECE ${fmt(res["trained (raw)"].overall.ece)} → ${fmt(res["trained (calibrated)"].overall.ece)}`;
+
+  if (run.demo) {
+    renderAnswers($("#run-demo"), run.demo.questions, run.demo.answers);
+    const note = document.createElement("p");
+    note.className = "note"; note.style.marginTop = "6px";
+    note.textContent = `State: "${run.demo.state.body}". This schema never appeared in training; the model was trained on four other workflows only.`;
+    $("#run-demo").prepend(note);
+    $("#run-demo-latency").textContent = `p50 ${fmt(run.demo.latency_p50_ms, 1)} ms on ${run.device}`;
+  }
+}
+async function loadRuns() {
+  const status = $("#runs-status");
+  try {
+    const index = await (await fetch("assets/runs/index.json", { cache: "no-cache" })).json();
+    runs = await Promise.all(index.map(async e => ({ ...(await (await fetch(`assets/runs/${e.file}`, { cache: "no-cache" })).json()), name: e.name })));
+    if (!runs.length) throw new Error("no runs");
+    runs.sort((a, b) => b.results["trained (calibrated)"].overall.accuracy - a.results["trained (calibrated)"].overall.accuracy);
+    const chips = $("#run-chips");
+    runs.forEach((r, i) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "chip"; b.textContent = `${r.encoder.split("/").pop()} · ${r.objective.toUpperCase()}`;
+      b.setAttribute("aria-pressed", String(i === 0));
+      b.addEventListener("click", () => { chips.querySelectorAll(".chip").forEach(c => c.setAttribute("aria-pressed", "false")); b.setAttribute("aria-pressed", "true"); renderRun(r); });
+      chips.appendChild(b);
+    });
+    status.hidden = true; $("#runs-body").hidden = false;
+    renderRun(runs[0]);
+  } catch (err) {
+    status.innerHTML = 'No training runs have been exported yet. Run the notebook on a GPU (the <a href="https://colab.research.google.com/github/MANUJMEHROTRA/jev-experimentation/blob/main/notebooks/train_jev_style_decision_model.ipynb">Colab link</a> defaults to ModernBERT-base), then commit the JSON it writes to <code>docs/assets/runs/</code>. The charts and results table appear here automatically.';
+  }
+}
+loadRuns();
+
+/* ---------- copy ---------- */
+$("#copy-code").addEventListener("click", async e => {
+  const btn = e.currentTarget, code = $("#usage-code").textContent;
+  try { await navigator.clipboard.writeText(code); btn.textContent = "Copied"; }
+  catch (_) { const r = document.createRange(); r.selectNodeContents($("#usage-code")); const s = getSelection(); s.removeAllRanges(); s.addRange(r); btn.textContent = "Selected, press ⌘C"; }
+  setTimeout(() => { btn.textContent = "Copy"; }, 1800);
+});
+})();
+</script>
+</body>
+</html>
